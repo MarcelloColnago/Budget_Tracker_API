@@ -1,0 +1,4 @@
+    **Extencões** 
+fastapi
+uvicorn
+sqlalchemy
