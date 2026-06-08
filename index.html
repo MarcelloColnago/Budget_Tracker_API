@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Budget Tracker - Painel Financeiro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans min-h-screen p-6">
+
+    <div class="max-w-5xl mx-auto">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-bold text-blue-900">💰 Budget Tracker</h1>
+            <p class="text-gray-600">Controle de Gastos com Alertas Inteligentes</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <div class="md:col-span-1 space-y-6">
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4">Nova Categoria</h2>
+                    <div class="space-y-3">
+                        <input id="cat-nome" type="text" placeholder="Ex: Alimentação" class="w-full p-2 border rounded">
+                        <input id="cat-teto" type="number" placeholder="Teto Mensal (R$)" class="w-full p-2 border rounded">
+                        <button onclick="criarCategoria()" class="w-full bg-blue-600 hover:bg-blue-700 text-white p-2 rounded font-medium">Criar</button>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4">Nova Despesa</h2>
+                    <div class="space-y-3">
+                        <input id="desp-desc" type="text" placeholder="Ex: Mercado Central" class="w-full p-2 border rounded">
+                        <input id="desp-valor" type="number" placeholder="Valor (R$)" class="w-full p-2 border rounded">
+                        <input id="desp-cat" type="text" placeholder="Categoria existente" class="w-full p-2 border rounded">
+                        <button onclick="registrarDespesa()" class="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded font-medium">Registrar</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="md:col-span-2 space-y-6">
+                <div id="painel-alertas" class="hidden p-4 rounded-lg font-bold shadow animate-bounce"></div>
+
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-semibold text-gray-800">Suas Categorias</h2>
+                        <button onclick="carregarCategorias()" class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">🔄 Atualizar</button>
+                    </div>
+                    <div id="lista-categorias" class="space-y-4">
+                        <p class="text-gray-500 italic text-center">Nenhuma categoria carregada.</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:8000";
+
+        // Função para buscar as categorias salvas no SQLite e exibir na tela
+        async function carregarCategorias() {
+            try {
+                const resposta = await fetch(`${API_URL}/categorias/`);
+                const categorias = await resposta.json();
+                
+                const container = document.getElementById('lista-categorias');
+                container.innerHTML = ""; // Limpa o texto antigo
+
+                if (categorias.length === 0) {
+                    container.innerHTML = '<p class="text-gray-500 italic text-center">Nenhuma categoria cadastrada ainda.</p>';
+                    return;
+                }
+
+                categorias.forEach(cat => {
+                    // Calcula a barra de progresso visual
+                    const percentual = Math.min((cat.total_gasto / cat.teto_mensal) * 100, 100);
+                    let corBarra = "bg-blue-500";
+                    if (percentual >= 100) corBarra = "bg-red-600";
+                    else if (percentual >= 80) corBarra = "bg-yellow-500";
+
+                    container.innerHTML += `
+                        <div class="border-b pb-3">
+                            <div class="flex justify-between font-medium text-gray-700">
+                                <span class="capitalize font-bold">${cat.nome}</span>
+                                <span>R$ ${cat.total_gasto.toFixed(2)} / R$ ${cat.teto_mensal.toFixed(2)}</span>
+                            </div>
+                            <div class="w-full bg-gray-200 h-3 rounded-full mt-1 overflow-hidden">
+                                <div class="${corBarra} h-full" style="width: ${percentual}%"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch (erro) {
+                alert("Erro ao conectar com o servidor Python. Garanta que o Uvicorn está rodando!");
+            }
+        }
+
+        // Função para Criar Categoria
+        async function criarCategoria() {
+            const nome = document.getElementById('cat-nome').value;
+            const teto = document.getElementById('cat-teto').value;
+
+            const resposta = await fetch(`${API_URL}/categorias/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nome: nome, teto_mensal: parseFloat(teto) })
+            });
+
+            const dados = await resposta.json();
+            if (resposta.ok) {
+                alert(dados.mensagem);
+                document.getElementById('cat-nome').value = "";
+                document.getElementById('cat-teto').value = "";
+                carregarCategorias(); // Recarrega a lista
+            } else {
+                alert("Erro: " + dados.detail);
+            }
+        }
+
+        // Função para Registrar Despesa e Capturar Alertas
+        async function registrarDespesa() {
+            const desc = document.getElementById('desp-desc').value;
+            const valor = document.getElementById('desp-valor').value;
+            const cat = document.getElementById('desp-cat').value;
+
+            const resposta = await fetch(`${API_URL}/despesas/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ descricao: desc, valor: parseFloat(valor), categoria_nome: cat })
+            });
+
+            const dados = await resposta.json();
+            const boxAlerta = document.getElementById('painel-alertas');
+
+            if (resposta.ok) {
+                // Limpa campos
+                document.getElementById('desp-desc').value = "";
+                document.getElementById('desp-valor').value = "";
+                document.getElementById('desp-cat').value = "";
+                
+                // Verifica se o Python mandou algum aviso na resposta JSON
+                if (dados.ALERTA_CRITICO) {
+                    boxAlerta.className = "bg-red-100 text-red-800 border-l-4 border-red-600 p-4 rounded-lg font-bold shadow block animate-bounce";
+                    boxAlerta.innerText = dados.ALERTA_CRITICO;
+                } else if (dados.AVISO) {
+                    boxAlerta.className = "bg-yellow-100 text-yellow-800 border-l-4 border-yellow-500 p-4 rounded-lg font-bold shadow block animate-bounce";
+                    boxAlerta.innerText = dados.AVISO;
+                } else {
+                    boxAlerta.className = "hidden"; // Esconde se não houver avisos
+                }
+
+                carregarCategorias(); // Atualiza o painel visual
+            } else {
+                alert("Erro: " + dados.detail);
+            }
+        }
+
+        // Carrega os dados assim que a página abre
+        carregarCategorias();
+    </script>
+</body>
+</html>

@@ -9,6 +9,23 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Budget Tracker API", version="0.2.0")
 
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware  # 1. IMPORTE ISSO
+from sqlalchemy.orm import Session
+# ... seus outros imports permanecem iguais ...
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Budget Tracker API", version="0.2.0")
+
+# 2. ADICIONE ESSE BLOCO LOGO AQUI:
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite que a sua página HTML acesse a API
+    allow_credentials=True,
+    allow_methods=["*"],  # Permite todos os comandos (POST, GET, etc.)
+    allow_headers=["*"],
+)
 # Função de ajuda (Dependency) para abrir e fechar a conexão com o banco em cada clique
 def get_db():
     db = SessionLocal()
