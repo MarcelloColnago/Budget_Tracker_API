@@ -1,4 +1,4 @@
-    **Extencões** 
 fastapi
 uvicorn
 sqlalchemy
+pydantic
