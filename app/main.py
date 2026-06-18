@@ -1,3 +1,4 @@
+from fastapi.responses import FileResponse
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.schemas import CategoriaCreate, DespesaCreate
@@ -36,7 +37,7 @@ def get_db():
 
 @app.get("/")
 def home():
-    return {"mensagem": "API Budget Tracker com Banco de Dados integrada! 💾"}
+    return FileResponse("index.html")
 
 # ----------------------------------------------------
 # ROTAS DE CATEGORIAS (Agora no Banco de Dados)
