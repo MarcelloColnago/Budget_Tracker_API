@@ -49,114 +49,111 @@
                         <p class="text-gray-500 italic text-center">Nenhuma categoria carregada.</p>
                     </div>
                 </div>
-            </div>
 
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4">Registro de Despesas</h2>
+                    <div id="lista-despesas" class="space-y-2">
+                        <p class="text-gray-500 italic text-center">Nenhuma despesa carregada.</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
         const API_URL = "http://127.0.0.1:8000";
 
-        // Função para buscar as categorias salvas no SQLite e exibir na tela
+        // --- CATEGORIAS ---
         async function carregarCategorias() {
-            try {
-                const resposta = await fetch(`${API_URL}/categorias/`);
-                const categorias = await resposta.json();
-                
-                const container = document.getElementById('lista-categorias');
-                container.innerHTML = ""; // Limpa o texto antigo
+            const resposta = await fetch(`${API_URL}/categorias/`);
+            const categorias = await resposta.json();
+            const container = document.getElementById('lista-categorias');
+            container.innerHTML = "";
 
-                if (categorias.length === 0) {
-                    container.innerHTML = '<p class="text-gray-500 italic text-center">Nenhuma categoria cadastrada ainda.</p>';
-                    return;
-                }
+            categorias.forEach(cat => {
+                const percentual = Math.min((cat.total_gasto / cat.teto_mensal) * 100, 100);
+                let corBarra = "bg-blue-500";
+                if (percentual >= 100) corBarra = "bg-red-600";
+                else if (percentual >= 80) corBarra = "bg-yellow-500";
 
-                categorias.forEach(cat => {
-                    // Calcula a barra de progresso visual
-                    const percentual = Math.min((cat.total_gasto / cat.teto_mensal) * 100, 100);
-                    let corBarra = "bg-blue-500";
-                    if (percentual >= 100) corBarra = "bg-red-600";
-                    else if (percentual >= 80) corBarra = "bg-yellow-500";
-
-                    container.innerHTML += `
-                        <div class="border-b pb-3">
-                            <div class="flex justify-between font-medium text-gray-700">
-                                <span class="capitalize font-bold">${cat.nome}</span>
+                container.innerHTML += `
+                    <div class="border-b pb-3">
+                        <div class="flex justify-between font-medium text-gray-700">
+                            <span class="capitalize font-bold">${cat.nome}</span>
+                            <div>
                                 <span>R$ ${cat.total_gasto.toFixed(2)} / R$ ${cat.teto_mensal.toFixed(2)}</span>
-                            </div>
-                            <div class="w-full bg-gray-200 h-3 rounded-full mt-1 overflow-hidden">
-                                <div class="${corBarra} h-full" style="width: ${percentual}%"></div>
+                                <button onclick="excluirCategoria('${cat.nome}')" class="ml-3 text-red-500 text-xs hover:underline">Excluir</button>
                             </div>
                         </div>
-                    `;
-                });
-            } catch (erro) {
-                alert("Erro ao conectar com o servidor Python. Garanta que o Uvicorn está rodando!");
-            }
+                        <div class="w-full bg-gray-200 h-3 rounded-full mt-1 overflow-hidden">
+                            <div class="${corBarra} h-full" style="width: ${percentual}%"></div>
+                        </div>
+                    </div>
+                `;
+            });
         }
 
-        // Função para Criar Categoria
         async function criarCategoria() {
             const nome = document.getElementById('cat-nome').value;
             const teto = document.getElementById('cat-teto').value;
-
-            const resposta = await fetch(`${API_URL}/categorias/`, {
+            await fetch(`${API_URL}/categorias/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ nome: nome, teto_mensal: parseFloat(teto) })
             });
+            carregarCategorias();
+        }
 
-            const dados = await resposta.json();
-            if (resposta.ok) {
-                alert(dados.mensagem);
-                document.getElementById('cat-nome').value = "";
-                document.getElementById('cat-teto').value = "";
-                carregarCategorias(); // Recarrega a lista
-            } else {
-                alert("Erro: " + dados.detail);
+        async function excluirCategoria(nome) {
+            if (confirm(`Excluir categoria '${nome}' e todas as suas despesas?`)) {
+                await fetch(`${API_URL}/categorias/${nome}`, { method: 'DELETE' });
+                carregarCategorias();
+                carregarDespesas();
             }
         }
 
-        // Função para Registrar Despesa e Capturar Alertas
+        // --- DESPESAS ---
+        async function carregarDespesas() {
+            const resposta = await fetch(`${API_URL}/despesas/`);
+            const despesas = await resposta.json();
+            const container = document.getElementById('lista-despesas');
+            container.innerHTML = "";
+            despesas.forEach(d => {
+                container.innerHTML += `
+                    <div class="flex justify-between items-center p-2 border-b">
+                        <span>${d.descricao} - <strong>R$ ${d.valor.toFixed(2)}</strong> (${d.categoria_nome})</span>
+                        <button onclick="excluirDespesa(${d.id})" class="bg-red-500 text-white px-2 py-1 rounded text-xs">Excluir</button>
+                    </div>
+                `;
+            });
+        }
+
         async function registrarDespesa() {
             const desc = document.getElementById('desp-desc').value;
             const valor = document.getElementById('desp-valor').value;
             const cat = document.getElementById('desp-cat').value;
-
-            const resposta = await fetch(`${API_URL}/despesas/`, {
+            
+            const res = await fetch(`${API_URL}/despesas/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ descricao: desc, valor: parseFloat(valor), categoria_nome: cat })
             });
-
-            const dados = await resposta.json();
-            const boxAlerta = document.getElementById('painel-alertas');
-
-            if (resposta.ok) {
-                // Limpa campos
-                document.getElementById('desp-desc').value = "";
-                document.getElementById('desp-valor').value = "";
-                document.getElementById('desp-cat').value = "";
-                
-                // Verifica se o Python mandou algum aviso na resposta JSON
-                if (dados.ALERTA_CRITICO) {
-                    boxAlerta.className = "bg-red-100 text-red-800 border-l-4 border-red-600 p-4 rounded-lg font-bold shadow block animate-bounce";
-                    boxAlerta.innerText = dados.ALERTA_CRITICO;
-                } else if (dados.AVISO) {
-                    boxAlerta.className = "bg-yellow-100 text-yellow-800 border-l-4 border-yellow-500 p-4 rounded-lg font-bold shadow block animate-bounce";
-                    boxAlerta.innerText = dados.AVISO;
-                } else {
-                    boxAlerta.className = "hidden"; // Esconde se não houver avisos
-                }
-
-                carregarCategorias(); // Atualiza o painel visual
-            } else {
-                alert("Erro: " + dados.detail);
+            
+            if (res.ok) {
+                carregarCategorias();
+                carregarDespesas();
             }
         }
 
-        // Carrega os dados assim que a página abre
+        async function excluirDespesa(id) {
+            await fetch(`${API_URL}/despesas/${id}`, { method: 'DELETE' });
+            carregarCategorias();
+            carregarDespesas();
+        }
+
+        // Inicialização
         carregarCategorias();
+        carregarDespesas();
     </script>
 </body>
 </html>
