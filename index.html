@@ -14,8 +14,27 @@
             <p class="text-gray-600">Controle de Gastos com Alertas Inteligentes</p>
         </header>
 
+        <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <h2 class="text-xl font-semibold mb-4">📊 Dashboard</h2>
+            <div id="dashboard" class="grid grid-cols-2 gap-4">
+                <div><strong>Total Gasto:</strong> <span id="total-gasto">R$ 0,00</span></div>
+                <div><strong>Categorias:</strong> <span id="total-categorias">0</span></div>
+                <div><strong>Maior Categoria:</strong> <span id="maior-categoria">-</span></div>
+                <div><strong>Maior Gasto:</strong> <span id="maior-gasto">R$ 0,00</span></div>
+            </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-lg shadow-md mb-4">
+            <h2 class="font-semibold mb-2">Filtrar por Período</h2>
+            <input id="data-inicio" type="date" class="border p-2 rounded">
+            <input id="data-fim" type="date" class="border p-2 rounded">
+            <button onclick="filtrarDespesas()" class="bg-blue-600 text-white px-4 py-2 rounded">
+                Filtrar
+            </button>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            
+
             <div class="md:col-span-1 space-y-6">
                 <div class="bg-white p-6 rounded-lg shadow-md">
                     <h2 class="text-xl font-semibold text-gray-800 mb-4">Nova Categoria</h2>
@@ -29,9 +48,11 @@
                 <div class="bg-white p-6 rounded-lg shadow-md">
                     <h2 class="text-xl font-semibold text-gray-800 mb-4">Nova Despesa</h2>
                     <div class="space-y-3">
-                        <input id="desp-desc" type="text" placeholder="Ex: Mercado Central" class="w-full p-2 border rounded">
+                        <input id="desp-desc" type="text" placeholder="Ex: Mercado" class="w-full p-2 border rounded">
                         <input id="desp-valor" type="number" placeholder="Valor (R$)" class="w-full p-2 border rounded">
-                        <input id="desp-cat" type="text" placeholder="Categoria existente" class="w-full p-2 border rounded">
+                        <select id="desp-cat" class="w-full p-2 border rounded">
+                            <option value="" disabled selected>Categoria existente</option>
+                        </select>
                         <button onclick="registrarDespesa()" class="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded font-medium">Registrar</button>
                     </div>
                 </div>
@@ -63,12 +84,57 @@
     <script>
         const API_URL = "http://127.0.0.1:8000";
 
-        // --- CATEGORIAS ---
+        async function carregarDashboard() {
+            const resposta = await fetch(`${API_URL}/dashboard`);
+            const dados = await resposta.json();
+            document.getElementById('total-gasto').innerText = `R$ ${dados.total_gasto.toFixed(2)}`;
+            document.getElementById('total-categorias').innerText = dados.total_categorias;
+            document.getElementById('maior-categoria').innerText = dados.maior_categoria ?? "-";
+            document.getElementById('maior-gasto').innerText = `R$ ${dados.maior_gasto.toFixed(2)}`;
+        }
+
+        async function filtrarDespesas() {
+            const inicio = document.getElementById('data-inicio').value;
+            const fim = document.getElementById('data-fim').value;
+
+            if (!inicio || !fim) {
+                alert("Selecione as duas datas para filtrar.");
+                return;
+            }
+
+            const resposta = await fetch(`${API_URL}/despesas/filtro?inicio=${inicio}&fim=${fim}`);
+            const despesas = await resposta.json();
+            const container = document.getElementById('lista-despesas');
+            container.innerHTML = "";
+
+            if (despesas.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 italic text-center">Nenhuma despesa neste período.</p>';
+                return;
+            }
+
+            despesas.forEach(d => {
+                container.innerHTML += `
+                    <div class="flex justify-between p-2 border-b">
+                        <span>${d.descricao} - <strong>R$ ${d.valor.toFixed(2)}</strong> (${d.categoria_nome}) — ${d.data}</span>
+                    </div>
+                `;
+            });
+        }
+
         async function carregarCategorias() {
             const resposta = await fetch(`${API_URL}/categorias/`);
             const categorias = await resposta.json();
             const container = document.getElementById('lista-categorias');
+            const select = document.getElementById('desp-cat');
+
             container.innerHTML = "";
+            // CORRIGIDO: limpa e repopula o select junto com a lista
+            select.innerHTML = '<option value="" disabled selected>Categoria existente</option>';
+
+            if (categorias.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 italic text-center">Nenhuma categoria carregada.</p>';
+                return;
+            }
 
             categorias.forEach(cat => {
                 const percentual = Math.min((cat.total_gasto / cat.teto_mensal) * 100, 100);
@@ -90,18 +156,36 @@
                         </div>
                     </div>
                 `;
+
+                // Popula o select de despesas
+                select.innerHTML += `<option value="${cat.nome}">${cat.nome}</option>`;
             });
         }
 
         async function criarCategoria() {
-            const nome = document.getElementById('cat-nome').value;
+            const nome = document.getElementById('cat-nome').value.trim();
             const teto = document.getElementById('cat-teto').value;
-            await fetch(`${API_URL}/categorias/`, {
+
+            if (!nome || !teto) {
+                alert("Preencha o nome e o teto da categoria.");
+                return;
+            }
+
+            const res = await fetch(`${API_URL}/categorias/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nome: nome, teto_mensal: parseFloat(teto) })
+                body: JSON.stringify({ nome, teto_mensal: parseFloat(teto) })
             });
-            carregarCategorias();
+
+            if (res.ok) {
+                document.getElementById('cat-nome').value = '';
+                document.getElementById('cat-teto').value = '';
+                carregarCategorias();
+                carregarDashboard();
+            } else {
+                const erro = await res.json();
+                alert(erro.detail);
+            }
         }
 
         async function excluirCategoria(nome) {
@@ -109,19 +193,25 @@
                 await fetch(`${API_URL}/categorias/${nome}`, { method: 'DELETE' });
                 carregarCategorias();
                 carregarDespesas();
+                carregarDashboard();
             }
         }
 
-        // --- DESPESAS ---
         async function carregarDespesas() {
             const resposta = await fetch(`${API_URL}/despesas/`);
             const despesas = await resposta.json();
             const container = document.getElementById('lista-despesas');
             container.innerHTML = "";
+
+            if (despesas.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 italic text-center">Nenhuma despesa cadastrada.</p>';
+                return;
+            }
+
             despesas.forEach(d => {
                 container.innerHTML += `
                     <div class="flex justify-between items-center p-2 border-b">
-                        <span>${d.descricao} - <strong>R$ ${d.valor.toFixed(2)}</strong> (${d.categoria_nome})</span>
+                        <span>${d.descricao} - <strong>R$ ${d.valor.toFixed(2)}</strong> (${d.categoria_nome}) — ${d.data}</span>
                         <button onclick="excluirDespesa(${d.id})" class="bg-red-500 text-white px-2 py-1 rounded text-xs">Excluir</button>
                     </div>
                 `;
@@ -129,19 +219,44 @@
         }
 
         async function registrarDespesa() {
-            const desc = document.getElementById('desp-desc').value;
+            const desc = document.getElementById('desp-desc').value.trim();
             const valor = document.getElementById('desp-valor').value;
             const cat = document.getElementById('desp-cat').value;
-            
+
+            if (!desc || !valor || !cat) {
+                alert("Preencha todos os campos da despesa.");
+                return;
+            }
+
             const res = await fetch(`${API_URL}/despesas/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ descricao: desc, valor: parseFloat(valor), categoria_nome: cat })
             });
-            
+
             if (res.ok) {
+                const dados = await res.json();
+
+                // Exibe alerta visual se houver aviso da API
+                const painel = document.getElementById('painel-alertas');
+                if (dados.ALERTA_CRITICO) {
+                    painel.className = "p-4 rounded-lg font-bold shadow animate-bounce bg-red-100 text-red-700";
+                    painel.innerText = dados.ALERTA_CRITICO;
+                } else if (dados.AVISO) {
+                    painel.className = "p-4 rounded-lg font-bold shadow animate-bounce bg-yellow-100 text-yellow-700";
+                    painel.innerText = dados.AVISO;
+                } else {
+                    painel.className = "hidden";
+                }
+
+                document.getElementById('desp-desc').value = '';
+                document.getElementById('desp-valor').value = '';
                 carregarCategorias();
                 carregarDespesas();
+                carregarDashboard();
+            } else {
+                const erro = await res.json();
+                alert(erro.detail);
             }
         }
 
@@ -149,9 +264,11 @@
             await fetch(`${API_URL}/despesas/${id}`, { method: 'DELETE' });
             carregarCategorias();
             carregarDespesas();
+            carregarDashboard();
         }
 
         // Inicialização
+        carregarDashboard();
         carregarCategorias();
         carregarDespesas();
     </script>

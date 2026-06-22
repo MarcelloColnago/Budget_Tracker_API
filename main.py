@@ -1,18 +1,17 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from datetime import date
 
 from app.schemas import CategoriaCreate, DespesaCreate
 from app.database import SessionLocal, engine, Base
 from app.models import CategoriaModel, DespesaModel
 
-# Cria tabelas no banco
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Budget Tracker API", version="0.2.0")
+app = FastAPI(title="Budget Tracker API", version="0.3.0")
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,7 +20,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# DB session
 def get_db():
     db = SessionLocal()
     try:
@@ -29,7 +27,6 @@ def get_db():
     finally:
         db.close()
 
-# HOME
 @app.get("/")
 def home():
     return FileResponse("index.html")
@@ -67,13 +64,55 @@ def listar_categorias(db: Session = Depends(get_db)):
     return db.query(CategoriaModel).all()
 
 
+@app.delete("/categorias/{nome}")
+def excluir_categoria(nome: str, db: Session = Depends(get_db)):
+    categoria = db.query(CategoriaModel).filter(CategoriaModel.nome == nome).first()
+    if not categoria:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada!")
+
+    db.query(DespesaModel).filter(DespesaModel.categoria_nome == nome).delete()
+    db.delete(categoria)
+    db.commit()
+    return {"mensagem": "Categoria e despesas excluídas!"}
+
+
 # -----------------------------
 # DESPESAS
+# CORRIGIDO: rotas estáticas ANTES das dinâmicas
+# /despesas/filtro estava sendo capturado por /despesas/{categoria_nome}
 # -----------------------------
 
 @app.get("/despesas/")
 def listar_todas_despesas(db: Session = Depends(get_db)):
     return db.query(DespesaModel).all()
+
+
+# CORRIGIDO: rota estática definida antes de /{categoria_nome}
+@app.get("/despesas/filtro")
+def filtrar_despesas(
+    inicio: date = Query(..., description="Data inicial (YYYY-MM-DD)"),
+    fim: date = Query(..., description="Data final (YYYY-MM-DD)"),
+    db: Session = Depends(get_db)
+):
+    despesas = db.query(DespesaModel).filter(
+        DespesaModel.data >= inicio,
+        DespesaModel.data <= fim
+    ).all()
+
+    return despesas
+
+
+# Rota dinâmica DEPOIS das estáticas
+@app.get("/despesas/{categoria_nome}")
+def listar_despesas_por_categoria(categoria_nome: str, db: Session = Depends(get_db)):
+    despesas = db.query(DespesaModel).filter(
+        DespesaModel.categoria_nome == categoria_nome.lower()
+    ).all()
+
+    if not despesas:
+        raise HTTPException(status_code=404, detail="Nenhuma despesa encontrada para esta categoria.")
+
+    return despesas
 
 
 @app.post("/despesas/")
@@ -87,12 +126,19 @@ def registrar_despesa(despesa: DespesaCreate, db: Session = Depends(get_db)):
     if not categoria:
         raise HTTPException(status_code=404, detail="Categoria não encontrada no banco!")
 
-    categoria.total_gasto += despesa.valor
+    # CORRIGIDO: total recalculado do banco para evitar inconsistência ao reiniciar
+    total_atual = sum(
+        d.valor for d in db.query(DespesaModel).filter(
+            DespesaModel.categoria_nome == cat_nome
+        ).all()
+    )
+    categoria.total_gasto = total_atual + despesa.valor
 
     nova_despesa = DespesaModel(
         descricao=despesa.descricao,
         valor=despesa.valor,
-        categoria_nome=cat_nome
+        categoria_nome=cat_nome,
+        data=despesa.data
     )
 
     db.add(nova_despesa)
@@ -105,7 +151,8 @@ def registrar_despesa(despesa: DespesaCreate, db: Session = Depends(get_db)):
             "id": nova_despesa.id,
             "descricao": nova_despesa.descricao,
             "valor": nova_despesa.valor,
-            "categoria": categoria.nome
+            "categoria": categoria.nome,
+            "data": nova_despesa.data.isoformat()
         }
     }
 
@@ -116,56 +163,75 @@ def registrar_despesa(despesa: DespesaCreate, db: Session = Depends(get_db)):
 
     return resposta
 
-# -----------------------------
-# DELETAR DESPESAS 
-# -----------------------------
 
 @app.delete("/despesas/{despesa_id}")
 def excluir_despesa(despesa_id: int, db: Session = Depends(get_db)):
-    # 1. Busca a despesa
     despesa = db.query(DespesaModel).filter(DespesaModel.id == despesa_id).first()
-    
+
     if not despesa:
         raise HTTPException(status_code=404, detail="Despesa não encontrada!")
 
-    # 2. Busca a categoria para atualizar o total_gasto
-    categoria = db.query(CategoriaModel).filter(CategoriaModel.nome == despesa.categoria_nome).first()
-    
+    categoria = db.query(CategoriaModel).filter(
+        CategoriaModel.nome == despesa.categoria_nome
+    ).first()
+
     if categoria:
-        categoria.total_gasto -= despesa.valor
-    
-    # 3. Remove a despesa
+        # CORRIGIDO: max(0.0) evita total_gasto negativo
+        categoria.total_gasto = max(0.0, categoria.total_gasto - despesa.valor)
+
     db.delete(despesa)
     db.commit()
-    
+
     return {"mensagem": f"Despesa '{despesa.descricao}' (id: {despesa_id}) excluída com sucesso!"}
 
 
-# -----------------------------
-# LISTAR DESPESAS 
-# -----------------------------
+# CORRIGIDO: agora atualiza o total_gasto da categoria ao editar o valor
+@app.put("/despesas/{id}")
+def editar_despesa(id: int, dados: DespesaCreate, db: Session = Depends(get_db)):
+    despesa = db.query(DespesaModel).filter(DespesaModel.id == id).first()
 
-@app.get("/despesas/{categoria_nome}")
-def listar_despesas_por_categoria(categoria_nome: str, db: Session = Depends(get_db)):
-    # Busca todas as despesas daquela categoria
-    despesas = db.query(DespesaModel).filter(DespesaModel.categoria_nome == categoria_nome.lower()).all()
-    
-    if not despesas:
-        raise HTTPException(status_code=404, detail="Nenhuma despesa encontrada para esta categoria.")
-    
-    return despesas
+    if not despesa:
+        raise HTTPException(status_code=404, detail="Despesa não encontrada")
 
-@app.delete("/categorias/{nome}")
-def excluir_categoria(nome: str, db: Session = Depends(get_db)):
-    # 1. Busca a categoria
-    categoria = db.query(CategoriaModel).filter(CategoriaModel.nome == nome).first()
-    if not categoria:
-        raise HTTPException(status_code=404, detail="Categoria não encontrada!")
-    
-    # 2. Apaga todas as despesas desta categoria primeiro
-    db.query(DespesaModel).filter(DespesaModel.categoria_nome == nome).delete()
-    
-    # 3. Apaga a categoria
-    db.delete(categoria)
+    categoria = db.query(CategoriaModel).filter(
+        CategoriaModel.nome == despesa.categoria_nome
+    ).first()
+
+    if categoria:
+        categoria.total_gasto = max(0.0, categoria.total_gasto - despesa.valor + dados.valor)
+
+    despesa.descricao = dados.descricao
+    despesa.valor = dados.valor
+    despesa.data = dados.data
+
     db.commit()
-    return {"mensagem": "Categoria e despesas excluídas!"}
+
+    return {"mensagem": "Despesa atualizada"}
+
+
+# -----------------------------
+# DASHBOARD
+# -----------------------------
+
+@app.get("/dashboard")
+def dashboard(db: Session = Depends(get_db)):
+    categorias = db.query(CategoriaModel).all()
+    despesas = db.query(DespesaModel).all()
+
+    total_gasto = sum(d.valor for d in despesas)
+    total_categorias = len(categorias)
+
+    maior_categoria = None
+    maior_gasto = 0
+
+    for categoria in categorias:
+        if categoria.total_gasto > maior_gasto:
+            maior_gasto = categoria.total_gasto
+            maior_categoria = categoria.nome
+
+    return {
+        "total_gasto": total_gasto,
+        "total_categorias": total_categorias,
+        "maior_categoria": maior_categoria,
+        "maior_gasto": maior_gasto
+    }

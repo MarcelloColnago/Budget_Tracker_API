@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float
+from sqlalchemy import Column, Integer, String, Float, Date
 from app.database import Base
+from datetime import date
 
 class CategoriaModel(Base):
     __tablename__ = "categorias"
@@ -16,3 +17,4 @@ class DespesaModel(Base):
     descricao = Column(String)
     valor = Column(Float)
     categoria_nome = Column(String)
+    data = Column(Date, default=date.today)
